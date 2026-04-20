@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EnergyDecision Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f5f7; color: #1a1a2e; min-height: 100vh; }
+
+  header { background: #1a1a2e; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  header h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.3px; }
+  .header-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .device-badge { font-size: 12px; background: rgba(255,255,255,0.12); padding: 4px 12px; border-radius: 20px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; display: inline-block; margin-right: 6px; animation: blink 2s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  #ist-clock { font-size: 13px; font-weight: 600; color: #fff; background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px; }
+  #last-updated { font-size: 12px; color: rgba(255,255,255,0.5); }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .metric-card { background: #fff; border-radius: 10px; padding: 16px; border: 1px solid #e8eaed; }
+  .metric-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .metric-value { font-size: 26px; font-weight: 700; line-height: 1; }
+  .metric-unit { font-size: 12px; color: #888; margin-top: 3px; }
+  .metric-card.alert-peak    { border-left: 4px solid #f59e0b; }
+  .metric-card.alert-offpeak { border-left: 4px solid #3b82f6; }
+  .metric-card.alert-normal  { border-left: 4px solid #22c55e; }
+
+  .alert-banner { border-radius: 10px; padding: 12px 18px; margin-bottom: 20px; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px; }
+  .alert-banner.peak    { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+  .alert-banner.offpeak { background: #dbeafe; color: #1e3a8a; border: 1px solid #93c5fd; }
+  .alert-banner.normal  { background: #dcfce7; color: #14532d; border: 1px solid #86efac; }
+
+  .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  @media (max-width: 680px) { .charts-grid { grid-template-columns: 1fr; } }
+  .chart-card { background: #fff; border-radius: 10px; padding: 16px; border: 1px solid #e8eaed; }
+  .chart-card.full { grid-column: 1 / -1; }
+  .chart-title { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 14px; }
+  .chart-wrap { position: relative; }
+
+  .table-card { background: #fff; border-radius: 10px; border: 1px solid #e8eaed; overflow: hidden; margin-bottom: 20px; }
+  .table-header { padding: 14px 18px; border-bottom: 1px solid #e8eaed; font-size: 13px; font-weight: 600; color: #555; display: flex; justify-content: space-between; align-items: center; }
+  .refresh-btn { font-size: 12px; padding: 5px 14px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; color: #555; }
+  .refresh-btn:hover { background: #f4f5f7; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f8f9fb; padding: 10px 14px; text-align: left; font-weight: 600; color: #666; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid #e8eaed; }
+  td { padding: 10px 14px; border-bottom: 1px solid #f0f1f3; color: #333; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafbfc; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: 500; }
+  .badge-peak    { background: #fef3c7; color: #92400e; }
+  .badge-offpeak { background: #dbeafe; color: #1e3a8a; }
+  .badge-normal  { background: #dcfce7; color: #14532d; }
+
+  .loading { text-align: center; padding: 60px; color: #888; font-size: 14px; }
+  .error-msg { background: #fee2e2; color: #991b1b; border-radius: 10px; padding: 16px; margin-bottom: 16px; font-size: 13px; }
+
+  .section-label { font-size: 11px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .peak-hours { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+  .hour-map-wrap { background: #fff; border-radius: 10px; border: 1px solid #e8eaed; padding: 14px 16px; margin-bottom: 20px; }
+  .hour-pill { width: 36px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; cursor: default; }
+  .hour-peak     { background: #fef3c7; color: #92400e; }
+  .hour-off      { background: #f0f1f3; color: #888; }
+  .hour-now-peak { background: #f59e0b; color: #fff; outline: 2px solid #d97706; outline-offset: 2px; }
+  .hour-now-off  { background: #3b82f6; color: #fff; outline: 2px solid #2563eb; outline-offset: 2px; }
+  .hour-legend { display: flex; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
+  .hour-legend span { font-size: 11px; color: #888; display: flex; align-items: center; gap: 5px; }
+  .hour-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>&#9889; EnergyDecision Dashboard</h1>
+  <div class="header-right">
+    <span class="device-badge"><span class="status-dot"></span>esp32-001</span>
+    <span id="ist-clock">IST --:--:--</span>
+    <span id="last-updated">Loading...</span>
+  </div>
+</header>
+
+<div class="container">
+  <div id="error-box" class="error-msg" style="display:none;"></div>
+  <div id="alert-banner" class="alert-banner normal" style="display:none;">
+    <span id="alert-icon" style="font-size:18px;"></span>
+    <span id="alert-text"></span>
+  </div>
+
+  <div class="metrics" id="metrics">
+    <div class="loading">Fetching data from AWS...</div>
+  </div>
+
+  <div class="charts-grid" id="charts-grid" style="display:none;">
+    <div class="chart-card full">
+      <div class="chart-title">Power usage over time (W)</div>
+      <div class="chart-wrap" style="height:200px;"><canvas id="powerChart" role="img" aria-label="Power usage over time"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Voltage readings (V)</div>
+      <div class="chart-wrap" style="height:180px;"><canvas id="voltageChart" role="img" aria-label="Voltage readings"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Alert type breakdown</div>
+      <div class="chart-wrap" style="height:180px;"><canvas id="alertChart" role="img" aria-label="Alert breakdown"></canvas></div>
+    </div>
+  </div>
+
+  <div class="hour-map-wrap">
+    <div class="section-label">IST peak hour map</div>
+    <div class="peak-hours" id="peak-hours"></div>
+    <div class="hour-legend">
+      <span><i style="background:#f59e0b;"></i> Current hour (peak)</span>
+      <span><i style="background:#3b82f6;"></i> Current hour (off-peak)</span>
+      <span><i style="background:#fef3c7;border:1px solid #fcd34d;"></i> Peak hours — &#8377;8/unit</span>
+      <span><i style="background:#f0f1f3;border:1px solid #e0e0e0;"></i> Off-peak — &#8377;5/unit</span>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <div class="table-header">
+      Recent readings (IST)
+      <button class="refresh-btn" onclick="fetchData()">&#8635; Refresh now</button>
+    </div>
+    <div id="table-wrap"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<script>
+const API_URL = 'https://8kd2i5ok17.execute-api.ap-south-1.amazonaws.com/default/EnergyDashboardAPI';
+
+let powerChart, voltageChart, alertChart;
+
+// Correct IST: UTC+5:30 = UTC + 19800 seconds
+function getIST() {
+  const now = new Date();
+  const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+  return new Date(utcMs + 19800000); // +5h30m in ms
+}
+
+function isPeak(h) {
+  return (h >= 7 && h <= 11) || (h >= 18 && h <= 22);
+}
+
+// Live IST clock in header — updates every second
+function updateClock() {
+  const ist = getIST();
+  const hh = String(ist.getHours()).padStart(2, '0');
+  const mm = String(ist.getMinutes()).padStart(2, '0');
+  const ss = String(ist.getSeconds()).padStart(2, '0');
+  document.getElementById('ist-clock').textContent = 'IST ' + hh + ':' + mm + ':' + ss;
+  buildHourMap(ist.getHours());
+}
+
+function buildHourMap(currentHour) {
+  const el = document.getElementById('peak-hours');
+  el.innerHTML = '';
+  for (let h = 0; h < 24; h++) {
+    const d = document.createElement('div');
+    const peak = isPeak(h);
+    const isCurrent = h === currentHour;
+    if (isCurrent) {
+      d.className = 'hour-pill ' + (peak ? 'hour-now-peak' : 'hour-now-off');
+    } else {
+      d.className = 'hour-pill ' + (peak ? 'hour-peak' : 'hour-off');
+    }
+    d.textContent = String(h).padStart(2, '0');
+    d.title = h + ':00 IST — ' + (peak ? 'Peak ₹8/unit' : 'Off-peak ₹5/unit') + (isCurrent ? ' ← NOW' : '');
+    el.appendChild(d);
+  }
+}
+
+function formatIST(ts) {
+  // ts is already IST string like "2026-04-20T14:17:00"
+  if (!ts) return '-';
+  const date = ts.slice(0, 10);   // 2026-04-20
+  const time = ts.slice(11, 19);  // 14:17:00
+  const today = getIST().toISOString().slice(0, 10);
+  return date === today ? time : date + ' ' + time;
+}
+
+function renderMetrics(latest) {
+  const alertClass = latest.alert_type === 'peak' ? 'alert-peak' : latest.alert_type === 'offpeak' ? 'alert-offpeak' : 'alert-normal';
+  document.getElementById('metrics').innerHTML = `
+    <div class="metric-card ${alertClass}">
+      <div class="metric-label">Voltage</div>
+      <div class="metric-value">${latest.voltage.toFixed(1)}</div>
+      <div class="metric-unit">V</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Current</div>
+      <div class="metric-value">${latest.current.toFixed(1)}</div>
+      <div class="metric-unit">A</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Power</div>
+      <div class="metric-value">${latest.power.toFixed(0)}</div>
+      <div class="metric-unit">W</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Units</div>
+      <div class="metric-value">${latest.units.toFixed(2)}</div>
+      <div class="metric-unit">kWh</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Rate</div>
+      <div class="metric-value">&#8377;${latest.rate.toFixed(0)}</div>
+      <div class="metric-unit">per unit</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Est. monthly</div>
+      <div class="metric-value">&#8377;${latest.monthly_bill.toFixed(0)}</div>
+      <div class="metric-unit">bill</div>
+    </div>
+  `;
+}
+
+function renderAlert(latest) {
+  const banner = document.getElementById('alert-banner');
+  const icon = document.getElementById('alert-icon');
+  const text = document.getElementById('alert-text');
+  banner.style.display = 'flex';
+  if (latest.alert_type === 'peak') {
+    banner.className = 'alert-banner peak';
+    icon.textContent = '⚡';
+    text.textContent = 'Peak time high usage detected — SNS alert was sent!';
+  } else if (latest.alert_type === 'offpeak') {
+    banner.className = 'alert-banner offpeak';
+    icon.textContent = '🌙';
+    text.textContent = 'Off-peak high power detected — SNS alert was sent!';
+  } else {
+    banner.className = 'alert-banner normal';
+    icon.textContent = '✅';
+    text.textContent = 'Normal usage — operating within safe limits.';
+  }
+}
+
+function renderCharts(readings) {
+  const reversed = [...readings].reverse();
+  const labels = reversed.map(r => formatIST(r.timestamp));
+  const powers = reversed.map(r => r.power);
+  const voltages = reversed.map(r => r.voltage);
+  const bgColors = reversed.map(r =>
+    r.alert_type === 'peak'    ? 'rgba(245,158,11,0.75)' :
+    r.alert_type === 'offpeak' ? 'rgba(59,130,246,0.65)' :
+                                  'rgba(34,197,94,0.65)');
+
+  const alertCounts = readings.reduce((a, r) => {
+    a[r.alert_type] = (a[r.alert_type] || 0) + 1;
+    return a;
+  }, {});
+
+  document.getElementById('charts-grid').style.display = 'grid';
+
+  if (powerChart) powerChart.destroy();
+  powerChart = new Chart(document.getElementById('powerChart'), {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Power (W)', data: powers, backgroundColor: bgColors, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font: { size: 10 }, maxRotation: 45 }, grid: { display: false } },
+        y: { ticks: { font: { size: 11 }, callback: v => v + 'W' }, grid: { color: 'rgba(0,0,0,0.04)' }, beginAtZero: true }
+      }
+    }
+  });
+
+  if (voltageChart) voltageChart.destroy();
+  voltageChart = new Chart(document.getElementById('voltageChart'), {
+    type: 'line',
+    data: { labels, datasets: [{ label: 'Voltage', data: voltages, borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.08)', borderWidth: 2, pointRadius: 3, tension: 0.3, fill: true }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font: { size: 10 }, maxRotation: 45 }, grid: { display: false } },
+        y: { ticks: { font: { size: 11 }, callback: v => v + 'V' }, grid: { color: 'rgba(0,0,0,0.04)' } }
+      }
+    }
+  });
+
+  if (alertChart) alertChart.destroy();
+  alertChart = new Chart(document.getElementById('alertChart'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Peak alerts', 'Off-peak alerts', 'Normal'],
+      datasets: [{ data: [alertCounts.peak || 0, alertCounts.offpeak || 0, alertCounts.normal || 0],
+        backgroundColor: ['#f59e0b', '#3b82f6', '#22c55e'], borderWidth: 0, hoverOffset: 4 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '60%',
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 10, boxWidth: 10 } } }
+    }
+  });
+}
+
+function renderTable(readings) {
+  if (!readings.length) {
+    document.getElementById('table-wrap').innerHTML = '<div class="loading">No readings yet. Run a Lambda test event to add data.</div>';
+    return;
+  }
+  const rows = readings.map(r => `
+    <tr>
+      <td style="white-space:nowrap;">${formatIST(r.timestamp)}</td>
+      <td>${r.voltage.toFixed(1)} V</td>
+      <td>${r.current.toFixed(1)} A</td>
+      <td>${r.power.toFixed(0)} W</td>
+      <td>${r.units.toFixed(3)} kWh</td>
+      <td>&#8377;${r.rate.toFixed(0)}/unit</td>
+      <td>&#8377;${r.monthly_bill.toFixed(0)}</td>
+      <td>${r.is_peak
+        ? '<span class="badge badge-peak">Peak</span>'
+        : '<span class="badge badge-offpeak">Off-peak</span>'}</td>
+      <td><span class="badge badge-${r.alert_type === 'normal' ? 'normal' : r.alert_type === 'peak' ? 'peak' : 'offpeak'}">${r.alert_type}</span></td>
+    </tr>`).join('');
+  document.getElementById('table-wrap').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Time (IST)</th><th>Voltage</th><th>Current</th><th>Power</th>
+        <th>Units</th><th>Rate</th><th>Monthly est.</th><th>Period</th><th>Alert</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function fetchData() {
+  try {
+    document.getElementById('error-box').style.display = 'none';
+    const res = await fetch(API_URL);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const readings = data.readings || [];
+
+    if (!readings.length) {
+      document.getElementById('metrics').innerHTML = '<div class="loading">No readings yet — run a Lambda test event to add data.</div>';
+      document.getElementById('alert-banner').style.display = 'none';
+      return;
+    }
+
+    const latest = readings[0];
+    renderMetrics(latest);
+    renderAlert(latest);
+    renderCharts(readings);
+    renderTable(readings);
+
+    const ist = getIST();
+    const timeStr = ist.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    document.getElementById('last-updated').textContent = 'Refreshed ' + timeStr + ' IST';
+  } catch (err) {
+    document.getElementById('error-box').style.display = 'block';
+    document.getElementById('error-box').textContent = 'Could not reach API: ' + err.message;
+  }
+}
+
+// Start clock (updates every second)
+updateClock();
+setInterval(updateClock, 1000);
+
+// Fetch data immediately, then every 30 seconds
+fetchData();
+setInterval(fetchData, 30000);
+</script>
+</body>
+</html>
