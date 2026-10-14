@@ -8,18 +8,28 @@ table = dynamodb.Table('EnergyReadings')
 
 TOPIC_ARN = "arn:aws:sns:ap-south-1:207066930794:Energyalert"
 
-# -------- LOAD SHIFT SUGGESTION --------
-# Peak hours (same as the dashboard): 7:00-11:59 AM and 6:00-10:59 PM IST
-# So the cheap (off-peak) windows are: 12:00 PM - 6:00 PM and 11:00 PM - 7:00 AM
-def get_shift_time(hour):
-    if 7 <= hour <= 11:
-        return "12:00 PM", "6:00 PM"     # morning peak -> shift to afternoon
-    elif 18 <= hour <= 22:
-        return "11:00 PM", "7:00 AM"     # evening peak -> shift to night
-    elif 12 <= hour <= 17:
-        return "now", "6:00 PM"          # afternoon off-peak, ends at 6 PM
-    else:
-        return "now", "7:00 AM"          # night off-peak, ends at 7 AM
+# -------- TARIFF SCHEDULE (IST) --------
+# ON-PEAK  : 7:00 AM - 11:00 AM  and  6:00 PM - 10:00 PM   -> Rs 8/unit
+# OFF-PEAK : 11:00 AM - 6:00 PM  and  10:00 PM - 7:00 AM   -> Rs 5/unit
+PEAK_RATE = 8
+OFFPEAK_RATE = 5
+
+PEAK_TEXT = "7:00 AM - 11:00 AM, 6:00 PM - 10:00 PM"
+OFFPEAK_TEXT = "11:00 AM - 6:00 PM, 10:00 PM - 7:00 AM"
+
+# -------- LIMITS --------
+PEAK_USAGE_LIMIT = 100    # W  - above this in peak hours -> status email
+
+
+def is_peak_hour(hour):
+    return (7 <= hour < 11) or (18 <= hour < 22)
+
+
+def shift_recommendation(hour):
+    if 7 <= hour < 11:
+        return "Shift non-essential loads to off-peak hours: 11:00 AM - 6:00 PM"
+    return "Shift non-essential loads to off-peak hours: 10:00 PM - 7:00 AM"
+
 
 def lambda_handler(event, context):
 
@@ -33,28 +43,23 @@ def lambda_handler(event, context):
         # -------- TIME CONVERSION --------
         utc_time = datetime.utcnow()
         ist_time = utc_time + timedelta(hours=5, minutes=30)
-        hour = ist_time.hour
+        hour = int(event.get('test_hour', ist_time.hour))   # test_hour is only for testing
 
         print("IST Hour:", hour)
 
-        # -------- PEAK HOURS --------
-        morning_peak = 7 <= hour <= 11
-        evening_peak = 18 <= hour <= 22
-        is_peak = morning_peak or evening_peak
+        # -------- PEAK / OFF-PEAK --------
+        is_peak = is_peak_hour(hour)
 
-        # -------- PRICE SYSTEM --------
-        normal_rate = 5
-        peak_rate = 8
-
-        current_rate = peak_rate if is_peak else normal_rate
+        current_rate = PEAK_RATE if is_peak else OFFPEAK_RATE
         cost = units * current_rate
-
-        # -------- WHEN TO SHIFT LOAD --------
-        shift_from, shift_until = get_shift_time(hour)
-        saving = units * (peak_rate - normal_rate)
 
         # -------- MONTHLY BILL ESTIMATION --------
         monthly_bill = cost * 30
+
+        # -------- ALERT CONDITIONS --------
+        peak_alert = is_peak and power > PEAK_USAGE_LIMIT    # high usage in peak hours
+
+        alert_type = 'peak' if peak_alert else 'normal'
 
         # -------- SAVE TO DYNAMODB --------
         table.put_item(Item={
@@ -68,76 +73,42 @@ def lambda_handler(event, context):
             'cost': str(round(cost, 2)),
             'monthly_bill': str(round(monthly_bill, 2)),
             'is_peak': str(is_peak),
-            'alert_type': 'peak' if is_peak and (power > 100 or voltage > 250) else ('offpeak' if (not is_peak) and power > 800 else 'normal')
+            'alert_type': alert_type
         })
 
-        # -------- ALERT CONDITIONS --------
-        peak_high_voltage_alert = is_peak and (power > 100 or voltage > 250)
+        # -------- MESSAGE --------
+        subject = None
 
-        offpeak_high_power_alert = (not is_peak) and power > 800
-
-        message = ""
-
-        # PEAK TIME ALERT
-        if peak_high_voltage_alert:
-            message = f"""PEAK TIME HIGH USAGE ALERT
-
+        # PEAK HOUR STATUS
+        if peak_alert:
+            message = f"""Status: ON-PEAK
 Voltage: {voltage} V
 Current: {current} A
-Power: {power} W
 Units: {units} kWh
-
-Current Price: ₹{current_rate}/unit
-Estimated Monthly Bill: ₹{round(monthly_bill,2)}
-
-You are using high load during PEAK hours!
-Reduce usage to save electricity cost.
-
-SHIFT YOUR LOAD:
-Run heavy appliances (washing machine, geyser, iron, AC, pump)
-between {shift_from} and {shift_until} IST - off-peak rate ₹{normal_rate}/unit.
-Shifting this load saves about ₹{round(saving,2)}."""
-
-            sns.publish(
-                TopicArn=TOPIC_ARN,
-                Message=message,
-                Subject="Peak Time Energy Alert"
-            )
-
-        # OFF-PEAK HIGH POWER ALERT
-        elif offpeak_high_power_alert:
-            message = f"""OFF-PEAK HIGH POWER ALERT
-
-Voltage: {voltage} V
 Power: {power} W
-Units: {units} kWh
+Current Price: Rs {current_rate}/unit
+Estimated Monthly Bill: Rs {round(monthly_bill, 2)}
 
-Current Price: ₹{current_rate}/unit
-Estimated Monthly Bill: ₹{round(monthly_bill,2)}
+On-peak hours  (Rs {PEAK_RATE}/unit): {PEAK_TEXT}
+Off-peak hours (Rs {OFFPEAK_RATE}/unit): {OFFPEAK_TEXT}
 
-High power usage detected in OFF-PEAK time!
-Please check heavy appliances.
+Recommendation: {shift_recommendation(hour)}"""
+            subject = "Peak Time Energy Status"
 
-GOOD TIME FOR HEAVY LOAD:
-You are in the cheap window now - it lasts until {shift_until} IST.
-After that the peak rate ₹{peak_rate}/unit starts, so finish heavy work before then."""
-
-            sns.publish(
-                TopicArn=TOPIC_ARN,
-                Message=message,
-                Subject="Off-Peak Power Alert"
-            )
-
-        # NORMAL
+        # NO EMAIL
         else:
-            message = f"""NORMAL USAGE
-
+            message = f"""NORMAL - no email sent
+Status: {'ON-PEAK' if is_peak else 'OFF-PEAK'}
 Voltage: {voltage} V
-Power: {power} W
-Units: {units} kWh
+Power: {power} W"""
 
-Current Price: ₹{current_rate}/unit
-Estimated Monthly Bill: ₹{round(monthly_bill,2)}"""
+        # -------- SEND EMAIL --------
+        if subject:
+            sns.publish(
+                TopicArn=TOPIC_ARN,
+                Message=message,
+                Subject=subject
+            )
 
         print(message)
 
